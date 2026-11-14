@@ -4,15 +4,19 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { openPreview, root } from './browser.mjs';
 
 const KEY = 'cleanframe.home.v1';
-const PRIMARY = ['stremio', 'netflix', 'disneyplus', 'youtube', 'appletv', 'primevideo', 'abciview', 'sbs', 'applemusic'];
-const IDS = ['IkWsFHtOY9.Stremio', 'org.tizen.netflix-app', 'MCmYXNxgcu.DisneyPlus', '9Ur5IzDKqV.TizenYouTube', 'com.samsung.tv.aria-video', 'org.tizen.primevideo', 'mWK87Xghap.ABCiview', 'OyE7OuxlUi.SBSOnDemand', 'org.tizen.apple.apple-music'];
-const NAMES = ['Stremio', 'Netflix', 'Disney+', 'YouTube', 'Apple TV', 'Prime Video', 'ABC iview', 'SBS On Demand', 'Apple Music'];
-const EXTRA = 'AbCdEf1234.FamilyApp', SPOTIFY = 'rJeHak5zRg.Spotify';
+const PRIMARY = ['netflix', 'youtube', 'disneyplus', 'appletv', 'npo', 'videoland'];
+// NPO Start and Videoland have no verified Tizen IDs; these stand-ins check that discovery matches them by name.
+const IDS = ['org.tizen.netflix-app', '9Ur5IzDKqV.TizenYouTube', 'MCmYXNxgcu.DisneyPlus', 'com.samsung.tv.aria-video', 'NpoQa12345.NPOStart', 'VlndQa1234.Videoland'];
+const NAMES = ['Netflix', 'YouTube', 'Disney+', 'Apple TV', 'NPO Start', 'Videoland'];
+const EXTRA = 'AbCdEf1234.FamilyApp', SPOTIFY = 'rJeHak5zRg.Spotify', HBO = '5b8c3eb16b.BeamCTVDev', GUIDE = 'QaGuide123.TvGuide';
+const INSTALLED = IDS.length + 4;
+const FULL_DOCK = PRIMARY.concat([SPOTIFY, HBO, GUIDE]);
 const UNSAFE_NAME = 'Family <img src=x onerror="window.__catalogXss=1"> & TV';
 const CATALOG = IDS.map((id, i) => ({ id, name: NAMES[i], show: true, iconPath: '' })).concat([
   { id: EXTRA, name: UNSAFE_NAME, show: true, iconPath: '' },
   { id: SPOTIFY, name: 'Spotify', show: true, iconPath: '' },
-  { id: '5b8c3eb16b.BeamCTVDev', name: 'HBO Max', show: true, iconPath: '' },
+  { id: HBO, name: 'HBO Max', show: true, iconPath: '' },
+  { id: GUIDE, name: 'TV Guide', show: true, iconPath: '' },
   { id: 'nClrkHome1.FrameHome', name: 'CleanFrame', show: true },
   { id: 'AbCdEf1234.worker', name: 'Background worker', show: true },
   { id: 'com.samsung.tv.cobalt-yt', name: 'YouTube', show: true }
@@ -264,7 +268,7 @@ try {
     check('Failed open-mode write retains prior photo', (await state()).wallpaper === walls[0].id && (await stored()).wallpaper === walls[0].id);
   });
   await run('Font recovery invalidates fallback measurements', async () => {
-    const seed = baseline({ dock: ['sbs', 'netflix'], lastApp: 'sbs', look: { bg: 'photo', layout: 'list', apps: 'both', font: 'manrope', controls: 'both', focus: 'glass', material: 'soft' } });
+    const seed = baseline({ dock: ['videoland', 'netflix'], lastApp: 'videoland', look: { bg: 'photo', layout: 'list', apps: 'both', font: 'manrope', controls: 'both', focus: 'glass', material: 'soft' } });
     const geometry = () => current.evaluate(() => ({
       plate: document.querySelector('#phScene > .ph-plate.is-current').style.width,
       names: [...document.querySelectorAll('.ph-name')].map(e => ({ text: e.textContent, size: e.style.fontSize, top: e.style.top }))
@@ -456,14 +460,14 @@ try {
   await run('Real catalogue and native launch boundary', async () => {
     await page(); await library();
     const names = await current.locator('[data-action^="apps.open."] .label').allTextContents();
-    check('Consumer catalogue excludes services, self and duplicate YouTube', names.length === 12 && names.filter(n => n === 'YouTube').length === 1 && !names.includes('CleanFrame') && !names.includes('Background worker'), names);
+    check('Consumer catalogue excludes services, self and duplicate YouTube', names.length === INSTALLED && names.filter(n => n === 'YouTube').length === 1 && !names.includes('CleanFrame') && !names.includes('Background worker'), names);
     check('Installed names stay text, including HTML punctuation', names.includes(UNSAFE_NAME) && !(await current.evaluate(() => window.__catalogXss)));
     check('Exploration fixtures do not appear', !names.includes('Plex') && !names.includes('Jellyfin'));
     await act('apps.open.' + SPOTIFY); await current.waitForFunction(() => __tv.calls.length > 0);
     check('Extra-brand app launches native ID', (await current.evaluate(() => __tv.calls.at(-1))).id === SPOTIFY);
     await current.evaluate(() => window.dispatchEvent(new Event('focus')));
     await scene('home'); await act('home.app.netflix'); await current.waitForFunction(() => __tv.calls.length === 2);
-    check('Primary app keeps verified target', (await current.evaluate(() => __tv.calls.at(-1))).id === IDS[1]);
+    check('Primary app keeps verified target', (await current.evaluate(() => __tv.calls.at(-1))).id === IDS[0]);
     await current.evaluate(() => window.dispatchEvent(new Event('focus')));
     await act('util.art'); await current.waitForFunction(() => __tv.calls.length === 3);
     const art = await current.evaluate(() => __tv.calls.at(-1));
@@ -477,6 +481,19 @@ try {
     await current.evaluate(() => { window.dispatchEvent(new Event('focus')); __tv.launchFailure = true; });
     await scene('home'); await act('home.app.netflix'); await current.waitForFunction(() => ShoreQA.where().view === 'message');
     check('Launch failure is shown', /could not|unavailable|try again/i.test(await current.locator('#stage').innerText()));
+  });
+  await run('Name-matched apps launch without opening the catalogue', async () => {
+    await page(); await scene('home'); await act('home.app.npo');
+    await current.waitForFunction(() => __tv.calls.length === 1);
+    check('NPO Start launches the installed ID found by name', (await current.evaluate(() => __tv.calls.at(-1))).id === IDS[4] && await current.evaluate(() => __tv.catalogCalls >= 1));
+    await closePage();
+    await page({ catalog: CATALOG.filter(a => a.name !== 'Videoland') }); await scene('home'); await act('home.app.videoland');
+    await current.waitForFunction(() => ShoreQA.where().view === 'message');
+    check('Missing name-matched app reports it is not installed', /not installed/i.test(await current.locator('#stage').innerText()) && await current.evaluate(() => __tv.calls.length === 0));
+    await closePage();
+    await page(); await library();
+    const listed = await state();
+    check('Catalogue maps name-matched apps onto their Home entries', listed.catalog.ids.includes('npo') && listed.catalog.ids.includes('videoland') && !listed.catalog.ids.includes(IDS[4]));
   });
   await run('Independent app identity self-filter', async () => {
     const appId = 'AbCdEf1234.MyHome';
@@ -497,7 +514,7 @@ try {
     check('Catalogue failure leaves Home intact', same((await state()).dock, PRIMARY));
     await current.evaluate(() => { __tv.catalogFailure = false; }); await act('apps.retry');
     await current.waitForSelector('[data-action="apps.open.' + EXTRA + '"]');
-    check('Retry displays real installed names', (await current.locator('[data-action^="apps.open."]').count()) === 12);
+    check('Retry displays real installed names', (await current.locator('[data-action^="apps.open."]').count()) === INSTALLED);
   });
   await run('Native icon and failed-image fallback', async () => {
     await page({ catalog: CATALOG.map(a => a.id === EXTRA ? { ...a, iconPath: '/home/assets/icons/netflix.svg' } : a) });
@@ -525,7 +542,7 @@ try {
     check('Delayed catalogue safely fills reopened view', (await call('where')).view === 'apps' && (await state()).catalog.ids.includes(EXTRA) && (await call('where')).focusCount === 1);
   });
   await run('Immediate edits, undo, move cancellation and limits', async () => {
-    await page(); await editor();
+    await page({ seed: baseline({ dock: FULL_DOCK }) }); await editor();
     const start = (await state()).dock;
     await remove('netflix');
     check('Remove persists membership and keeps installation', !(await stored()).dock.includes('netflix') && (await current.evaluate(() => __tv.catalog.some(a => a.id === 'org.tizen.netflix-app'))));
@@ -535,10 +552,10 @@ try {
     await act('editor.move.netflix'); await nav('down'); check('Unfinished move does not write', same((await stored()).dock, start));
     await nav('back'); check('Back cancels unfinished move', same((await state()).dock, start));
     await act('editor.move.netflix'); await nav('down', 'ok');
-    const moved = start.slice(); [moved[1], moved[2]] = [moved[2], moved[1]];
+    const moved = start.slice(); [moved[0], moved[1]] = [moved[1], moved[0]];
     check('Placed move persists immediately', same((await stored()).dock, moved));
     await act('editor.add.' + EXTRA); check('Nine-app cap prevents addition', (await state()).dock.length === 9 && !(await state()).dock.includes(EXTRA));
-    await remove('stremio'); await act('editor.add.' + EXTRA);
+    await remove('youtube'); await act('editor.add.' + EXTRA);
     check('Native app can be pinned with stable ID', (await stored()).dock.includes(EXTRA) && (await state()).dock.length === 9);
     check('Native pin retains readable metadata for failed discovery', (await stored()).appRecords.some(a => a.id === EXTRA && a.name === UNSAFE_NAME));
     await current.reload(); await ready(); check('Native pin survives reload', (await state()).dock.includes(EXTRA));
@@ -1041,7 +1058,7 @@ try {
   await run('Physical-key repeats and Back hierarchy', async () => {
     await page(); await editor(); await remove('netflix');
     await current.keyboard.down('Enter'); await current.keyboard.down('Enter');
-    check('Held OK restores once without removing again', (await state()).dock.includes('netflix') && (await state()).dock.length === 9);
+    check('Held OK restores once without removing again', (await state()).dock.includes('netflix') && (await state()).dock.length === PRIMARY.length);
     await current.keyboard.up('Enter');
     await current.keyboard.down('Escape'); await current.keyboard.down('Escape');
     check('Held Back closes one layer only', (await call('where')).view === 'settings' && (await state()).focusAction === 'settings.editor');

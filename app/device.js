@@ -2,12 +2,13 @@
 (function () {
   'use strict';
   var IDS = {
-    stremio: 'IkWsFHtOY9.Stremio', netflix: 'org.tizen.netflix-app',
-    disneyplus: 'MCmYXNxgcu.DisneyPlus', youtube: '9Ur5IzDKqV.TizenYouTube',
-    appletv: 'com.samsung.tv.aria-video', primevideo: 'org.tizen.primevideo',
-    abciview: 'mWK87Xghap.ABCiview', sbs: 'OyE7OuxlUi.SBSOnDemand',
-    applemusic: 'org.tizen.apple.apple-music'
+    netflix: 'org.tizen.netflix-app', youtube: '9Ur5IzDKqV.TizenYouTube',
+    disneyplus: 'MCmYXNxgcu.DisneyPlus', appletv: 'com.samsung.tv.aria-video',
+    npo: '', videoland: ''
   };
+  // Brands whose Tizen IDs are not yet verified. The installed app is matched by its exact
+  // name and the discovered ID is kept in IDS for the rest of the session.
+  var BY_NAME = { npo: /^NPO( Start)?$/i, videoland: /^Videoland$/i };
   var STREAMING = ['as6cYRgkPy.Binge', '73iTZRTc34.Stan', '5b8c3eb16b.BeamCTVDev',
     'cj37Ni3qXM.HBONow', 'LBUAQX1exg.Hulu', 'gzcc4LRFBF.Peacock', 'rJyOSqC6Up.CBSAllAccess',
     'Rk72oKFsRS.OtterKidsProd', '70fRFUwYlD.OtterGAProd', 'PvWgqxV3Xa.YouTubeTV',
@@ -102,9 +103,26 @@
     try { api().launch(id, function () { finish(null); }, function (err) { finish(failure(err)); }); }
     catch (err) { finish(failure(err)); }
   }
+  function brandFor(a) {
+    var found = '';
+    Object.keys(IDS).forEach(function (brand) {
+      if (found) return;
+      if (IDS[brand] ? IDS[brand] === a.id : BY_NAME[brand] && BY_NAME[brand].test(a.name || '')) found = brand;
+    });
+    return found;
+  }
   function launch(brand, done) {
-    if (!IDS[brand]) { done({message: 'This app has no launch target.'}); return; }
-    launchApp(IDS[brand], done);
+    if (IDS[brand]) { launchApp(IDS[brand], done); return; }
+    if (!BY_NAME[brand]) { done({message: 'This app has no launch target.'}); return; }
+    if (!api()) { unavailable(done); return; }
+    var finish = bounded(done, 20000);
+    try {
+      api().getAppsInfo(function (list) {
+        list.forEach(function (a) { if (!IDS[brand] && brandFor(a) === brand) IDS[brand] = a.id; });
+        if (!IDS[brand]) { finish({ message: 'This app is not installed on this TV.', detail: 'Install it from Samsung Apps, then try again.' }); return; }
+        launchApp(IDS[brand], finish);
+      }, function (err) { finish(failure(err)); });
+    } catch (err) { finish(failure(err)); }
   }
   function art(done) {
     if (!api()) { unavailable(done); return; }
@@ -123,16 +141,16 @@
     var finish = bounded(done, 20000);
     try {
       api().getAppsInfo(function (list) {
-        var known = {}, seen = {}, result = [], self = selfId();
-        Object.keys(IDS).forEach(function (brand) { known[IDS[brand]] = brand; });
+        var seen = {}, result = [], self = selfId();
         list.forEach(function (a) {
-          var primary = !!known[a.id], stream = STREAMING.indexOf(a.id) >= 0;
+          var brand = a.id === self ? '' : brandFor(a), primary = !!brand, stream = STREAMING.indexOf(a.id) >= 0;
           var consumer = /^[A-Za-z0-9]{10}\.[A-Za-z0-9_-]+$/.test(a.id) || CONSUMER_SYSTEM.indexOf(a.id) >= 0;
           if (a.id === self || INTERNAL.indexOf(a.id) >= 0 || seen[a.id] || !a.name || (!primary && !stream && (!a.show || !consumer))) return;
           if (!primary && /(?:service|worker|preview|promotion|plugin|launcher|test|sdk|^ep[ -]|factory|daemon)/i.test(a.name + ' ' + a.id)) return;
           if (/-dummy$/.test(a.id) || a.id === 'com.samsung.tv.cobalt-yt') return;
           seen[a.id] = true;
-          result.push({ appId: a.id, name: a.name, brand: known[a.id] || EXTRA_BRANDS[a.id] || '', icon: a.iconPath || '', rank: primary ? Object.keys(IDS).indexOf(known[a.id]) : (stream ? 20 : 30) });
+          if (primary && !IDS[brand]) IDS[brand] = a.id;
+          result.push({ appId: a.id, name: a.name, brand: brand || EXTRA_BRANDS[a.id] || '', icon: a.iconPath || '', rank: primary ? Object.keys(IDS).indexOf(brand) : (stream ? 20 : 30) });
         });
         result.sort(function (a, b) { return a.rank - b.rank || a.name.toLowerCase().localeCompare(b.name.toLowerCase()); });
         finish(null, result);
