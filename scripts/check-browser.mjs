@@ -10,6 +10,8 @@ const IDS = ['org.tizen.netflix-app', '9Ur5IzDKqV.TizenYouTube', 'MCmYXNxgcu.Dis
 const NAMES = ['Netflix', 'YouTube', 'Disney+', 'Apple TV', 'NPO Start', 'Videoland'];
 const EXTRA = 'AbCdEf1234.FamilyApp', SPOTIFY = 'rJeHak5zRg.Spotify', HBO = '5b8c3eb16b.BeamCTVDev', GUIDE = 'QaGuide123.TvGuide';
 const INSTALLED = IDS.length + 4;
+// The default Tizen mock reports HDMI 1-3; each appears in the catalogue as a pinnable input.
+const MOCK_INPUTS = ['hdmi1', 'hdmi2', 'hdmi3'], CATALOGUE = INSTALLED + MOCK_INPUTS.length;
 const FULL_DOCK = PRIMARY.concat([SPOTIFY, HBO, GUIDE]);
 const UNSAFE_NAME = 'Family <img src=x onerror="window.__catalogXss=1"> & TV';
 const CATALOG = IDS.map((id, i) => ({ id, name: NAMES[i], show: true, iconPath: '' })).concat([
@@ -457,10 +459,28 @@ try {
     await current.waitForSelector('[data-action="inputs.retry"]');
     check('Empty inventory is truthful', (await current.locator('#stage').innerText()).includes('No HDMI inputs were reported'));
   });
+  await run('HDMI inputs as Home tiles', async () => {
+    await page(); await library();
+    const ids = (await state()).catalog.ids;
+    check('Catalogue lists each reported HDMI port once', MOCK_INPUTS.every(id => ids.includes(id)) && ids.filter(id => /^hdmi/.test(id)).length === MOCK_INPUTS.length, ids);
+    await editor(); await act('editor.add.hdmi2');
+    const saved = await stored();
+    check('Pinned input persists with its port number', saved.dock.includes('hdmi2') && saved.appRecords.some(r => r.id === 'hdmi2' && r.brand === 'hdmi' && r.input === 2), saved);
+    await current.reload(); await ready();
+    check('Pinned input survives reload before discovery', (await state()).dock.includes('hdmi2'));
+    await scene('home'); await current.evaluate(() => { __tv.calls = []; });
+    await act('home.app.hdmi2'); await current.waitForFunction(() => __tv.calls.some(c => c.id === 'org.tizen.tv-viewer'));
+    check('Input tile switches straight to its port', await current.evaluate(() => __tv.calls[0].method === 'setSource' && __tv.calls[0].number === 2 && __tv.calls[1].id === 'org.tizen.tv-viewer'), await current.evaluate(() => __tv.calls));
+    await closePage(); await page({ seed: baseline({ appRecords: [{ id: 'hdmi7', appId: 'x.y', name: '<b>', brand: 'hdmi', input: 2 }], dock: ['hdmi7', 'netflix'] }) });
+    check('Inconsistent input record is ignored', !(await state()).dock.includes('hdmi7'));
+    await closePage(); await page({ inputUnavailable: true }); await library();
+    const plain = (await state()).catalog;
+    check('Without the source API the catalogue still loads apps only', plain.loaded && !plain.error && !plain.ids.some(id => /^hdmi/.test(id)) && plain.ids.length === INSTALLED, plain);
+  });
   await run('Real catalogue and native launch boundary', async () => {
     await page(); await library();
     const names = await current.locator('[data-action^="apps.open."] .label').allTextContents();
-    check('Consumer catalogue excludes services, self and duplicate YouTube', names.length === INSTALLED && names.filter(n => n === 'YouTube').length === 1 && !names.includes('CleanFrame') && !names.includes('Background worker'), names);
+    check('Consumer catalogue excludes services, self and duplicate YouTube', names.length === CATALOGUE && names.filter(n => n === 'YouTube').length === 1 && !names.includes('CleanFrame') && !names.includes('Background worker'), names);
     check('Installed names stay text, including HTML punctuation', names.includes(UNSAFE_NAME) && !(await current.evaluate(() => window.__catalogXss)));
     check('Exploration fixtures do not appear', !names.includes('Plex') && !names.includes('Jellyfin'));
     await act('apps.open.' + SPOTIFY); await current.waitForFunction(() => __tv.calls.length > 0);
@@ -514,7 +534,7 @@ try {
     check('Catalogue failure leaves Home intact', same((await state()).dock, PRIMARY));
     await current.evaluate(() => { __tv.catalogFailure = false; }); await act('apps.retry');
     await current.waitForSelector('[data-action="apps.open.' + EXTRA + '"]');
-    check('Retry displays real installed names', (await current.locator('[data-action^="apps.open."]').count()) === INSTALLED);
+    check('Retry displays real installed names', (await current.locator('[data-action^="apps.open."]').count()) === CATALOGUE);
   });
   await run('Native icon and failed-image fallback', async () => {
     await page({ catalog: CATALOG.map(a => a.id === EXTRA ? { ...a, iconPath: '/home/assets/icons/netflix.svg' } : a) });

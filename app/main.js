@@ -88,6 +88,14 @@
 
   /* ---------- Helpers ---------- */
   function app(id) { for (var i = 0; i < APPS.length; i++) if (APPS[i].id === id) return APPS[i]; return null; }
+  /* HDMI inputs behave like apps so they can be pinned to Home; OK switches straight to that port. */
+  function isPort(n) { return typeof n === 'number' && isFinite(n) && n >= 0 && Math.floor(n) === n && n < 100; }
+  function inputApp(number) {
+    var id = 'hdmi' + number, a = app(id);
+    if (!a) { a = { id: id }; APPS.push(a); }
+    a.appId = id; a.input = number; a.name = 'HDMI ' + number; a.brand = 'hdmi'; a.mark = true; a.icon = '';
+    return id;
+  }
   function wall(id) { for (var i = 0; i < WALLS.length; i++) if (WALLS[i].id === id) return WALLS[i]; return null; }
   function wallIndex(id) { for (var i = 0; i < WALLS.length; i++) if (WALLS[i].id === id) return i; return 0; }
   function frostClass(w) { var i = [.12, .20, .30, .36, .44].indexOf(w.frostVeil); return i > 0 ? ' fv-' + (i + 1) : ''; }
@@ -328,6 +336,7 @@
     var s = saved && typeof saved === 'object' ? saved : {}, modern = s.look && typeof s.look === 'object' ? s.look : s;
     var legacyList = s.theme === 'list', h = [], recent = [], records = Array.isArray(s.appRecords) ? s.appRecords : [];
     records.slice(0, 256).forEach(function (a) {
+      if (a && a.brand === 'hdmi') { if (isPort(a.input) && a.id === 'hdmi' + a.input) inputApp(a.input); return; }
       if (!a || !safeId(a.id) || !safeId(a.appId) || typeof a.name !== 'string' || !a.name.trim() || app(a.id)) return;
       APPS.push({ id: a.id, appId: a.appId, name: a.name.slice(0, 160), brand: ['hbomax', 'spotify', 'tubi'].indexOf(a.brand) >= 0 ? a.brand : '', mark: ['hbomax', 'spotify', 'tubi'].indexOf(a.brand) >= 0, icon: safeIcon(a.icon) });
     });
@@ -355,7 +364,7 @@
     out.appRecords = [];
     c.home.concat(c.recent).forEach(function (key) {
       var a = app(key);
-      if (a && PRIMARY.indexOf(key) < 0 && !out.appRecords.some(function (r) { return r.id === key; })) out.appRecords.push({ id: a.id, appId: a.appId, name: a.name, brand: a.brand || '', icon: a.icon || '' });
+      if (a && PRIMARY.indexOf(key) < 0 && !out.appRecords.some(function (r) { return r.id === key; })) out.appRecords.push({ id: a.id, appId: a.appId, name: a.name, brand: a.brand || '', icon: a.icon || '', input: isPort(a.input) ? a.input : undefined });
     });
     return out;
   }
@@ -459,33 +468,43 @@
     if (!a || busy) return;
     if (S.c.home.indexOf(id) >= 0) { c = next(S.c.home.slice(), S.c.recent.slice()); c.lastApp = id; write(c, 'Last app'); }
     S.press = id; S.lastLaunch = a.name;
-    perform(a.name, function (done) { if (a.appId) FrameDevice.launchApp(a.appId, done); else FrameDevice.launch(a.id, done); });
+    perform(a.name, function (done) {
+      if (isPort(a.input)) FrameDevice.setSource(a.input, done);
+      else if (a.appId) FrameDevice.launchApp(a.appId, done);
+      else FrameDevice.launch(a.id, done);
+    });
   }
   function refreshCatalog() {
-    var request, oldFocus;
+    var request;
     if (catalog.loading) return;
     request = ++catalog.request; catalog.loading = true; catalog.error = null;
     FrameDevice.apps(function (err, entries) {
       if (request !== catalog.request) return;
-      catalog.loading = false;
-      if (err) { catalog.error = err.message || 'Could not read installed apps.'; if (!catalog.loaded) ALPHA = []; render(); return; }
-      oldFocus = top().id === 'apps' ? ALPHA[top().f.i] : null;
-      ALPHA = [];
-      entries.forEach(function (entry) {
-        var id = PRIMARY.indexOf(entry.brand) >= 0 ? entry.brand : entry.appId, a;
-        if (!safeId(id) || !safeId(entry.appId) || ALPHA.indexOf(id) >= 0) return;
-        a = app(id);
-        if (!a) { a = { id: id }; APPS.push(a); }
-        a.appId = entry.appId; a.brand = entry.brand || ''; a.mark = !!entry.brand;
-        a.icon = safeIcon(entry.icon);
-        a.name = PRIMARY.indexOf(id) >= 0 ? PRIMARY_APPS[PRIMARY.indexOf(id)].name : String(entry.name).slice(0, 160);
-        ALPHA.push(id);
-      });
-      ALPHA.sort(function (a, b) { return app(a).name.toLowerCase().localeCompare(app(b).name.toLowerCase()); });
-      catalog.loaded = true; catalog.error = null; catalog.revision++;
-      if (top().id === 'apps' && oldFocus && ALPHA.indexOf(oldFocus) >= 0) top().f.i = ALPHA.indexOf(oldFocus);
-      norm(); render();
+      if (err) { catalog.loading = false; catalog.error = err.message || 'Could not read installed apps.'; if (!catalog.loaded) ALPHA = []; render(); return; }
+      // Inputs are optional: without the source API, or when discovery fails, the catalogue still lists apps.
+      FrameDevice.sources(function (inputErr, inputs) { if (request === catalog.request) fillCatalog(entries, inputErr ? [] : inputs || []); });
     });
+  }
+  function fillCatalog(entries, inputs) {
+    var oldFocus;
+    catalog.loading = false;
+    oldFocus = top().id === 'apps' ? ALPHA[top().f.i] : null;
+    ALPHA = [];
+    entries.forEach(function (entry) {
+      var id = PRIMARY.indexOf(entry.brand) >= 0 ? entry.brand : entry.appId, a;
+      if (!safeId(id) || !safeId(entry.appId) || ALPHA.indexOf(id) >= 0) return;
+      a = app(id);
+      if (!a) { a = { id: id }; APPS.push(a); }
+      a.appId = entry.appId; a.brand = entry.brand || ''; a.mark = !!entry.brand;
+      a.icon = safeIcon(entry.icon);
+      a.name = PRIMARY.indexOf(id) >= 0 ? PRIMARY_APPS[PRIMARY.indexOf(id)].name : String(entry.name).slice(0, 160);
+      ALPHA.push(id);
+    });
+    inputs.forEach(function (input) { if (input && isPort(input.number)) { var id = inputApp(input.number); if (ALPHA.indexOf(id) < 0) ALPHA.push(id); } });
+    ALPHA.sort(function (a, b) { return app(a).name.toLowerCase().localeCompare(app(b).name.toLowerCase()); });
+    catalog.loaded = true; catalog.error = null; catalog.revision++;
+    if (top().id === 'apps' && oldFocus && ALPHA.indexOf(oldFocus) >= 0) top().f.i = ALPHA.indexOf(oldFocus);
+    norm(); render();
   }
 
   /* ---------- Navigation targets ---------- */
