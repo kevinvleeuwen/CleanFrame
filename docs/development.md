@@ -61,6 +61,23 @@ Create `.local/device.json` with:
 
 For developer access, connect the TV and Mac to the same network, enable Developer Mode in Apps → App Settings → 12345 and enter the Mac's local address. Fully restart the TV if the developer port remains closed.
 
+## Personal wallpapers (local overlay)
+
+Personal photos stay out of Git in `.local/wallpapers/`, which mirrors `app/` paths. `npm run package` adds them on top of `app/`, so its `assets/wallpapers/catalog.js` replaces the bundled gallery on that TV only; `npm run export:public` never includes them. The regular preview and checks keep the public gallery; `scripts/preview.py --local-wallpapers` (or `CLEANFRAME_LOCAL_WALLPAPERS=1` for the Node tools) shows the overlay.
+
+To refresh from a curated Lightroom album prepared by frame-art-sync:
+
+```sh
+../frame-art-sync/.venv/bin/python scripts/import-lightroom-wallpapers.py --count 30
+CLEANFRAME_LOCAL_WALLPAPERS=1 node scripts/build-materials.mjs
+# copy .local/materials/builder/lr-*-panel.jpg to .local/wallpapers/assets/wallpapers/
+# and the other lr-* material JPEGs to .local/wallpapers/assets/materials/
+CLEANFRAME_LOCAL_WALLPAPERS=1 GALLERY_OUT=lightroom-contrast GALLERY_IDS=<ids> node scripts/check-gallery-contrast.mjs
+GALLERY_OUT=lightroom-contrast python3 scripts/analyse-gallery-contrast.py
+```
+
+The importer keeps landscape photos whose subject survives a 16:9 crop and does not sit mostly behind the Dock. Raise `frostVeil` (up to .44) or set `listColumn` to 3 in the overlay catalogue where the contrast report shows misses; drop a photo that still falls below the minimum.
+
 ## Install and launch
 
 `npm run tv:install` uploads the signed widget with a unique build filename and calls Samsung's `vd_appinstall` command. It checks for `install completed` and confirms the app appears in the installed-app list. `sdb install` on this TV only uploaded the widget and did not install it.

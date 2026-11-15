@@ -60,6 +60,9 @@ def font_overlay(root=ROOT, include_private=True):
                 css.append("@font-face{font-family:'" + font['family'] + "';font-style:normal;"
                            'font-weight:' + str(weight) + ";src:url('private-fonts/" + relative + "') format('truetype');"
                            'font-display:block;' + font['metrics'] + '}')
+    if include_private:
+        from local_wallpapers import wallpaper_overlay
+        assets.update(wallpaper_overlay(root))
     assets['assets/private-fonts.css'] = ('\n'.join(css) + '\n').encode()
     assets['assets/font-catalog.js'] = ('window.CleanFramePrivateFontIDs = '
                                        + json.dumps(private_ids + PUBLIC_FONT_IDS) + ';\n').encode()

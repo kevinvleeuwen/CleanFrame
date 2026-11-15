@@ -5,6 +5,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from font_assets import font_overlay
+from local_wallpapers import wallpaper_overlay
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +28,15 @@ class Preview(SimpleHTTPRequestHandler):
             self.send_header('Content-Length', str(len(content)))
             self.end_headers()
             return io.BytesIO(content)
+        if self.server.local_wallpapers and route.startswith('/home/assets/'):
+            source = wallpaper_overlay().get(route[len('/home/'):])
+            if source is not None:
+                content = source.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', self.guess_type(route))
+                self.send_header('Content-Length', str(len(content)))
+                self.end_headers()
+                return io.BytesIO(content)
         return super().send_head()
 
     def translate_path(self, path):
@@ -59,8 +69,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=4795)
     parser.add_argument('--public-fonts', action='store_true', help='Use only the fonts distributed with the source')
+    parser.add_argument('--local-wallpapers', action='store_true', help='Show the personal wallpapers from .local/wallpapers')
     args = parser.parse_args()
     server = PreviewServer(('127.0.0.1', args.port), Preview)
     server.include_private_fonts = not args.public_fonts
+    server.local_wallpapers = args.local_wallpapers
     print('CleanFrame preview: http://127.0.0.1:' + str(server.server_port) + '/home/', flush=True)
     server.serve_forever()

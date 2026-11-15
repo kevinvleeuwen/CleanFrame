@@ -2,7 +2,8 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { openPreview, root } from './browser.mjs';
 
-const catalogue = JSON.parse(readFileSync(root + 'app/assets/wallpapers/SOURCES.json', 'utf8'));
+const sources = process.env.CLEANFRAME_LOCAL_WALLPAPERS === '1' ? '.local/wallpapers/assets/wallpapers/SOURCES.json' : 'app/assets/wallpapers/SOURCES.json';
+const catalogue = JSON.parse(readFileSync(root + sources, 'utf8'));
 const requested = process.argv[2] ? process.argv[2].split(',') : catalogue.map(w => w.id);
 if (requested.some(id => !catalogue.some(w => w.id === id))) throw Error('Unknown wallpaper');
 const destination = root + '.local/materials/builder/';
